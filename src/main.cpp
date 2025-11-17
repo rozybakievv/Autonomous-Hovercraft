@@ -8,6 +8,9 @@
 #define LIFT_FAN PD4
 #define TRIG_PIN PB3  // Trigger pin
 #define ECHO_PIN PD2  // Echo pin (PD2) - INT0
+
+#define FAN_THRUST_PIN PD6
+
 #define IR_PIN 0  // ADC channel for IR sensor (A0 / PC0)
 
 #define IMU_ADDR 0x68
@@ -40,6 +43,14 @@ void setup() {
     DDRD |= (1 << PD4);
     // Start with lift fan OFF
     PORTD &= ~(1 << PD4);
+
+    // PD6 as output (Thrust Fan - OC0A)
+    DDRD |= (1 << PD6);
+
+    // Configure Timer0 for Fast PWM on OC0A (PD6)
+    TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);  // Fast PWM, non-inverting
+    TCCR0B = (1 << CS01) | (1 << CS00);  // Prescaler 64 → ~490Hz
+    OCR0A = 0;  // Start at 0
 
     // Configure TRIG_PIN as OUTPUT
     DDRB |= (1 << TRIG_PIN);
@@ -215,7 +226,7 @@ uint32_t getDistanceLeft() {
     return 9999;
 }
 
-// --- Lift Fan Functions --- //
+// --- Fan Functions --- //
 void startLiftFan() {
 	PORTD |= (1<<PD4);
 }
@@ -223,6 +234,12 @@ void startLiftFan() {
 void stopLiftFan() {
 	PORTD &= ~(1<<PD4);
 }
+
+void setThrustFan(uint8_t speed) // 0 to 255 value
+{
+    OCR0A = speed;
+}
+
 
 // --- IMU Sensor Functions --- //
 void mpu6050_init(void) {
@@ -333,13 +350,13 @@ int main() {
     // Input / Outputs setup and sensors initialization
 	setup();
     _delay_ms(5);
-    i2c_init();
+    // i2c_init();
     _delay_ms(5);
-    ADC_init();
+    // ADC_init();
     _delay_ms(5);
-    mpu6050_init();
+    // mpu6050_init();
     _delay_ms(5);
-    calibration();
+    // calibration();
     uartPrint("Hovercraft Initialized ! \r\n");
 
     int counter = 0;
@@ -347,7 +364,16 @@ int main() {
 	// Main loop
 	while (1)
 	{
-        readIMU();
+        // PWM THRUST
+        /* setThrustFan(30);
+        uartPrint("Thrust fan set to 255\r\n");
+        uartPrintInt(OCR0A);
+        uartPrint("\r\n");
+        _delay_ms(1000); */
+
+
+        // IMU Sensor
+        /* readIMU();
         yaw += gyrZ * 0.01f; // gyroscope z-axis data over time (0.01f seconds delay)
 
         getRoll();
@@ -371,7 +397,7 @@ int main() {
         
         counter++;
 
-        _delay_ms(10);
+        _delay_ms(10); */
 
         // IR Sensor
 /*         uint16_t distanceIR = getDistanceTop();
@@ -391,7 +417,7 @@ int main() {
         
 
         // US Sensor test
-        /* uint32_t distanceLeft32 = getDistanceLeft();
+        uint32_t distanceLeft32 = getDistanceLeft();
         if (distanceLeft32 == 9999)
         {
             uartPrint("US Sensor left error");
@@ -400,7 +426,7 @@ int main() {
             uartPrint("cm \r\n");
         }
 
-        _delay_ms(500); */
+        _delay_ms(500);
 
         // Test lift fan
 		/* startLiftFan();
@@ -408,6 +434,6 @@ int main() {
 		_delay_ms(15000);
 		uartPrint("Stopping...\r\n");
 		stopLiftFan();
-		_delay_ms(5000); */
+		_delay_ms(5000);*/
 	}
 }
