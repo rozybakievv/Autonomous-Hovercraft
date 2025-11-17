@@ -16,8 +16,8 @@
 float gyro_scale = 131.0f;
 float acc_scale = 16384.0f;
 
-int16_t AccX, AccY, AccZ, GyrX, GyrY, GyrZ; // raw
-float accX, accY, accZ, gyrX, gyrY, gyrZ; // converted to g or deg
+int16_t AccX, AccY, AccZ, GyrZ; // raw
+float accX, accY, accZ, gyrZ; // converted to g or deg
 float yaw = 0.0f;
 float pitch = 0.0f;
 float roll = 0.0f;
@@ -74,6 +74,12 @@ void uartPrintInt(uint32_t num) {
   char buffer[10];
   itoa(num, buffer, 10);
   uartPrint(buffer);
+}
+
+void uartPrintFloat(float num) {
+    char buffer[20];
+    dtostrf(num, 6, 2, buffer); // width=6, precision=2
+    uartPrint(buffer);
 }
 
 // ---- I2C Functions ---- //
@@ -219,61 +225,6 @@ void stopLiftFan() {
 }
 
 // --- IMU Sensor Functions --- //
-void mpu6050_set_gyro_range(uint8_t range) {
-    i2c_start();
-    i2c_write((IMU_ADDR << 1) | 0);
-    i2c_write(0x1B);  // GYRO_CONFIG register
-    i2c_write(range << 3);  // Bits 4:3 set the range
-    i2c_stop();
-    
-    // Update scale factor based on range
-        case GYRO_RANGE_250:
-            gyro_scale = 131.0f;
-            uartPrint("Gyro range set to ±250°/s\r\n");
-            break;
-        case GYRO_RANGE_500:
-            gyro_scale = 65.5f;
-            uartPrint("Gyro range set to ±500°/s\r\n");
-            break;
-        case GYRO_RANGE_1000:
-            gyro_scale = 32.8f;
-            uartPrint("Gyro range set to ±1000°/s\r\n");
-            break;
-        case GYRO_RANGE_2000:
-            gyro_scale = 16.4f;
-            uartPrint("Gyro range set to ±2000°/s\r\n");
-            break;
-    }
-}
-
-void mpu6050_set_acc_range(uint8_t range) {
-    i2c_start();
-    i2c_write((IMU_ADDR << 1) | 0);
-    i2c_write(0x1C);  // GYRO_CONFIG register
-    i2c_write(range);  // Bits 4:3 set the range
-    i2c_stop();
-    
-    // Update scale factor based on range
-    switch(range) {
-        case ACCEL_RANGE_2G:
-            acc_scale = 16384.0f;
-            uartPrint("Accel range set to 2g\r\n");
-            break;
-        case ACCEL_RANGE_4G:
-            acc_scale = 8192.0f;
-            uartPrint("Accel range set to 4g\r\n");
-            break;
-        case ACCEL_RANGE_8G:
-            acc_scale = 4096.0f;
-            uartPrint("Accel range set to 8g\r\n");
-            break;
-        case ACCEL_RANGE_16G:
-            acc_scale = 2048.0f;
-            uartPrint("Accel range set to 16g\r\n");
-            break;
-    }
-}
-
 void mpu6050_init(void) {
     uartPrint("Initializing MPU6050...\r\n");
     
@@ -286,21 +237,142 @@ void mpu6050_init(void) {
 
     _delay_ms(10);
 
-    // set gyro / acc range
-    
+    // Set gyro range scale
+    i2c_start();
+    i2c_write((IMU_ADDR << 1) | 0);
+    i2c_write(0x1B);  // GYRO_CONFIG register
+    i2c_write(1 << 3);  // Bits 4:3 set the range
+    i2c_stop();
+    gyro_scale = 65.5f;
+    uartPrint("Gyro range set to ±500°/s\r\n");
 
+    i2c_start();
+    i2c_write((IMU_ADDR << 1) | 0);
+    i2c_write(0x1C);  // GYRO_CONFIG register
+    i2c_write(0x08);  // Bits 4:3 set the range
+    i2c_stop();
+    acc_scale = 8192.0f;
+    uartPrint("Accel range set to 4g\r\n");
+    
     uartPrint("MPU6050 initialized successfully\r\n");
 }
 
+void readIMUCalibration() {
+    uint8_t data[14];
+
+    // Write starting register, then repeated start for read
+    i2c_start();
+    i2c_write((IMU_ADDR << 1) | 0);
+    i2c_write(0x3B); // ACCEL_XOUT_H
+    i2c_start();
+    i2c_write((IMU_ADDR << 1) | 1);
+    for (uint8_t i = 0; i < 13; i++) data[i] = i2c_read_ack();
+    data[13] = i2c_read_nack();
+    i2c_stop();
+
+    // raw data readings (skip temp)
+    AccX = ((int16_t)data[0] << 8) | data[1];
+    AccY = ((int16_t)data[2] << 8) | data[3];
+    AccZ = ((int16_t)data[4] << 8) | data[5];
+    GyrZ = ((int16_t)data[12] << 8) | data[13];
+
+    // convert to g
+    accX = (float)AccX / acc_scale;
+    accY = (float)AccY / acc_scale;
+    accZ = (float)AccZ / acc_scale;
+    gyrZ = (float)GyrZ / gyro_scale;
+}
+
+void readIMU() {
+    readIMUCalibration();  // Read raw values
+    
+    // Apply offsets
+    accX -= offset_ax;
+    accY -= offset_ay;
+    accZ -= offset_az;
+    gyrZ -= offset_gz;
+}
+
+void calibration() {
+    uartPrint("Calibrating ... Please do not move IMU\r\n");
+
+    int bufferSize = 1000;
+    float buff_ax=0.0f, buff_ay=0.0f, buff_az=0.0f, buff_gx=0.0f, buff_gy=0.0f ,buff_gz=0.0f;
+    int i = 0;
+
+    while (i < (bufferSize + 101)) {
+        readIMUCalibration();
+
+        if (i > 100 && i <= (bufferSize+100)) // discard the 100 first readings and sum the rest
+        {
+            buff_ax = buff_ax + accX;
+            buff_ay = buff_ay + accY;
+            buff_az = buff_az + accZ;
+            buff_gz = buff_gz + gyrZ;
+        }
+        
+        if (i==(bufferSize+100)) {
+            offset_ax=buff_ax/bufferSize;
+            offset_ay=buff_ay/bufferSize;
+            offset_az=(buff_az/bufferSize)-1.0f;
+            offset_gz=buff_gz/bufferSize;
+        }
+
+        i++;
+        _delay_ms(2); // to not get repeated measures
+    }
+
+    uartPrint("Calibration complete !");
+}
+
+void getRoll() {
+    roll = atan2(-accX, accZ) * 180.0f / M_PI;
+}
+
 int main() {
+    // Input / Outputs setup and sensors initialization
 	setup();
     _delay_ms(5);
+    i2c_init();
+    _delay_ms(5);
     ADC_init();
+    _delay_ms(5);
+    mpu6050_init();
+    _delay_ms(5);
+    calibration();
     uartPrint("Hovercraft Initialized ! \r\n");
+
+    int counter = 0;
 
 	// Main loop
 	while (1)
 	{
+        readIMU();
+        yaw += gyrZ * 0.01f; // gyroscope z-axis data over time (0.01f seconds delay)
+
+        getRoll();
+
+        // prints only 100 iterations (1s)
+        if (counter >= 100) {
+            uartPrint("Acc - X:");
+            uartPrintFloat(accX);
+            uartPrint(" Y:");
+            uartPrintFloat(accY);
+            uartPrint(" Z:");
+            uartPrintFloat(accZ);
+            
+            uartPrint("| Yaw: ");
+            uartPrintFloat(yaw);
+
+            uartPrint("\r\n");
+
+            counter = 0;
+        }
+        
+        counter++;
+
+        _delay_ms(10);
+
         // IR Sensor
 /*         uint16_t distanceIR = getDistanceTop();
         uartPrint("IR Distance\r\n");
@@ -319,7 +391,7 @@ int main() {
         
 
         // US Sensor test
-        uint32_t distanceLeft32 = getDistanceLeft();
+        /* uint32_t distanceLeft32 = getDistanceLeft();
         if (distanceLeft32 == 9999)
         {
             uartPrint("US Sensor left error");
@@ -328,7 +400,7 @@ int main() {
             uartPrint("cm \r\n");
         }
 
-        _delay_ms(500);
+        _delay_ms(500); */
 
         // Test lift fan
 		/* startLiftFan();
