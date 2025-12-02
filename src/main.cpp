@@ -41,6 +41,7 @@ float system_yaw = 0;
 
 #define FORWARD_TIMEOUT_MS 2000  // 2 seconds
 #define DISTANCE_CHANGE_THRESHOLD 10
+const uint16_t BAR_DISTANCE_THRESHOLD = 25;
 
 // ---------------- IMU Variables ---------------- //
 float gyro_scale = 65.5f;
@@ -556,7 +557,7 @@ int main() {
                     // Use last turn direction if available, otherwise decide based on right distance
                     if (right_distance >= 10 && right_distance != 9999) {
                         system_yaw = yaw;
-                        target_yaw = normalizeAngle(system_yaw - (TURN_ANGLE-45));  // MODIFIED: -15° from start
+                        target_yaw = normalizeAngle(system_yaw - (TURN_ANGLE-45));
                         system_state = TURNING;
                         turning_state = RIGHT;
                         turn_start_time = now;
@@ -632,11 +633,11 @@ int main() {
                     set_servo_angle(90); 
                 }
                 
-                setThrustFan(200);
+                setThrustFan(180);
             } 
             else if (turning_state == RIGHT) 
             {
-                setThrustFan(200);
+                setThrustFan(180);
                 if (stuck == true)
                 {
                     set_servo_angle(180);
