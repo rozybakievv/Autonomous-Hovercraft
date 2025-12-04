@@ -54,7 +54,7 @@ float offset_ax, offset_ay, offset_az, offset_gz;
 
 unsigned long last_imu_time = 0;
 
-// Ultrasonic sensor variables
+// US Sensor vars
 volatile uint32_t pulse_width_left = 0;
 volatile uint32_t pulse_width_right = 0;
 volatile uint32_t echo_start_left = 0;
@@ -126,15 +126,13 @@ unsigned long micros() {
     }
     sei();
     
-    // Timer0 with prescaler 64: each tick = 4us
-    // Overflow every 256 ticks = 1024us
     return (m * 1024UL) + (t * 4UL);
 }
 
 // ---------------- I2C Functions ---------------- //
 void i2c_init(void) {
     TWSR = 0x00;
-    TWBR = 72;  // 100kHz I2C for better stability
+    TWBR = 72;  // 100kHz I2C
     TWCR = (1 << TWEN);  // Enable I2C
 }
 
@@ -194,16 +192,15 @@ uint16_t readIR() {
 // ---------------- US Sensor Functions ---------------- //
 ISR(INT0_vect) {
     if (PIND & (1 << ECHO_PIN_LEFT)) {
-        // Rising edge - start timing
+        // Rising edge -> start timing
         echo_start_left = micros();
     } else {
-        // Falling edge - calculate pulse width
+        // Falling edge -> calculate pulse width
         if (echo_start_left > 0) {
             uint32_t end_time = micros();
             if (end_time >= echo_start_left) {
                 pulse_width_left = end_time - echo_start_left;
             } else {
-                // Handle overflow (rare case)
                 pulse_width_left = (0xFFFFFFFF - echo_start_left) + end_time;
             }
             echo_start_left = 0;
@@ -213,16 +210,15 @@ ISR(INT0_vect) {
 
 ISR(INT1_vect) {
     if (PIND & (1 << ECHO_PIN_RIGHT)) {
-        // Rising edge - start timing
+        // Rising edge -> start timing
         echo_start_right = micros();
     } else {
-        // Falling edge - calculate pulse width
+        // Falling edge -> calculate pulse width
         if (echo_start_right > 0) {
             uint32_t end_time = micros();
             if (end_time >= echo_start_right) {
                 pulse_width_right = end_time - echo_start_right;
             } else {
-                // Handle overflow (rare case)
                 pulse_width_right = (0xFFFFFFFF - echo_start_right) + end_time;
             }
             echo_start_right = 0;
@@ -264,22 +260,14 @@ uint32_t getDistance_Right() {
 
 // ---------------- Servo Control ---------------- //
 void servo_init() {
-    // Configure Timer1 for Fast PWM mode with ICR1 as TOP
-    // This gives us precise control over the PWM frequency and pulse width
-    
     DDRB |= (1 << SERVO_PIN);  // PB1 as output
     
     // Fast PWM mode, TOP = ICR1
-    TCCR1A = (1 << COM1A1) | (1 << WGM11);  // Clear OC1A on compare match, Fast PWM mode
-    TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);  // Fast PWM, prescaler = 8
+    TCCR1A = (1 << COM1A1) | (1 << WGM11);
+    TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);
     
-    // Set TOP value for 20ms period (50Hz)
-    // With 16MHz clock and prescaler 8: 16MHz / 8 = 2MHz = 0.5µs per tick
-    // For 20ms: 20000µs / 0.5µs = 40000 ticks
     ICR1 = 40000;
-    
-    // Set initial position to center (1500µs)
-    // 1500µs / 0.5µs = 3000 ticks
+
     OCR1A = 3000;
 }
 
@@ -308,29 +296,27 @@ void setThrustFan(uint8_t speed) {
 
 // ---------------- IMU Functions ---------------- //
 void mpu6050_init(void) {
-    _delay_ms(100);  // Wait for MPU6050 to power up
+    _delay_ms(100);
     
-    // Wake up MPU6050 (clear sleep bit)
     i2c_start();
     i2c_write((IMU_ADDR << 1) | 0);
     i2c_write(0x6B);  // PWR_MGMT_1 register
-    i2c_write(0x00);  // Clear sleep bit
+    i2c_write(0x00);
     i2c_stop();
     _delay_ms(100);
 
     // Set gyroscope range to ±500°/s
     i2c_start();
     i2c_write((IMU_ADDR << 1) | 0);
-    i2c_write(0x1B);  // GYRO_CONFIG register
-    i2c_write(0x08);  // ±500°/s (gyro_scale = 65.5)
+    i2c_write(0x1B);
+    i2c_write(0x08);
     i2c_stop();
     _delay_ms(10);
 
-    // Set accelerometer range to ±4g
     i2c_start();
     i2c_write((IMU_ADDR << 1) | 0);
-    i2c_write(0x1C);  // ACCEL_CONFIG register
-    i2c_write(0x08);  // ±4g (acc_scale = 8192)
+    i2c_write(0x1C);
+    i2c_write(0x08);
     i2c_stop();
     _delay_ms(10);
     
@@ -342,11 +328,11 @@ void readIMURaw() {
 
     i2c_start();
     i2c_write((IMU_ADDR << 1) | 0);
-    i2c_write(0x3B);  // Start reading from ACCEL_XOUT_H
+    i2c_write(0x3B);
     i2c_stop();
     
     i2c_start();
-    i2c_write((IMU_ADDR << 1) | 1);  // Read mode
+    i2c_write((IMU_ADDR << 1) | 1);
     for (uint8_t i = 0; i < 13; i++) {
         data[i] = i2c_read_ack();
     }
@@ -403,29 +389,28 @@ void readIMU() {
 
 // ---------------- Setup ---------------- //
 void setup() {
-    // UART - 9600 baud
     UBRR0H = 0;
     UBRR0L = 103;
     UCSR0B = (1 << TXEN0) | (1 << RXEN0);
     UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
 
-    // ===== LIFT FAN (PD4) - Digital output ===== //
+    // ===== LIFT FAN ===== //
     DDRD |= (1 << LIFT_FAN);
     PORTD &= ~(1 << LIFT_FAN);
 
-    // ===== THRUST FAN (PD5 / OC0B) - Timer0 Fast PWM ===== //
+    // ===== THRUST FAN ===== //
     DDRD |= (1 << FAN_THRUST_PIN);
-    TCCR0A = (1 << COM0B1) | (1 << WGM01) | (1 << WGM00);  // Fast PWM on OC0B, non-inverting
-    TCCR0B = (1 << CS01) | (1 << CS00);  // Prescaler 64 (for PWM and micros())
-    OCR0B = 0;  // CHANGED: Use OCR0B
+    TCCR0A = (1 << COM0B1) | (1 << WGM01) | (1 << WGM00);
+    TCCR0B = (1 << CS01) | (1 << CS00);
+    OCR0B = 0;
     TIMSK0 = (1 << TOIE0);
 
-    // ===== SERVO - Initialize with hardware PWM ===== //
+    // ===== SERVO ===== //
     servo_init();
 
-    // ===== Timer2 - 1ms interrupt for millis() ===== //
+    // ===== Timer2 ===== //
     TCCR2A = (1 << WGM21);  // CTC mode
-    TCCR2B = (1 << CS22) | (1 << CS20);  // Prescaler 128
+    TCCR2B = (1 << CS22) | (1 << CS20);
     OCR2A = 124;  // 1ms
     TIMSK2 = (1 << OCIE2A);
 
@@ -435,8 +420,8 @@ void setup() {
 
     DDRD &= ~((1 << ECHO_PIN_LEFT) | (1 << ECHO_PIN_RIGHT));
 
-    EICRA = (1 << ISC00) | (1 << ISC10);  // Any edge on INT0 and INT1
-    EIMSK = (1 << INT0) | (1 << INT1);    // Enable INT0 and INT1
+    EICRA = (1 << ISC00) | (1 << ISC10);
+    EIMSK = (1 << INT0) | (1 << INT1);
 
     sei();
 }
@@ -554,7 +539,6 @@ int main() {
                 } else if (now - forward_start_time >= FORWARD_TIMEOUT_MS) {
                     stuck = true;
 
-                    // Use last turn direction if available, otherwise decide based on right distance
                     if (right_distance >= 10 && right_distance != 9999) {
                         system_yaw = yaw;
                         target_yaw = normalizeAngle(system_yaw - (TURN_ANGLE-45));
@@ -606,7 +590,6 @@ int main() {
             break; }
         
         case TURNING: { // Turning state            
-            // Define an acceptable margin of error (e.g., within 3 degrees)
             const float TURN_COMPLETE_THRESHOLD = 1.0f; 
 
             // Calculate the remaining angle to turn
@@ -617,7 +600,7 @@ int main() {
             {
                 // Turn is complete or timed out (max 3 seconds)
                 set_servo_angle(0);
-                system_yaw = yaw; // Update system_yaw to the new orientation
+                system_yaw = yaw;
                 turning_state = STRAIGHT;
                 system_state = FORWARD;
                 stuck = false;
@@ -647,7 +630,6 @@ int main() {
             }
             else
             {
-                // Should not happen if logic in FORWARD state is correct
                 system_state = FORWARD;
                 turning_state = STRAIGHT;
             }
